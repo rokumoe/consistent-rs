@@ -1,7 +1,6 @@
 extern crate md5;
 
 use std::cmp::Ordering;
-use std::rc::Rc;
 
 mod hash {
     use std::num::Wrapping;
@@ -16,13 +15,13 @@ mod hash {
     }
 }
 
-#[derive(Debug, Eq)]
-struct Vnode {
+#[derive(Debug)]
+struct Vnode<T> {
     hash: u32,
-    val: Rc<String>,
+    val: T,
 }
 
-impl Ord for Vnode {
+impl<T> Ord for Vnode<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         if self.hash < other.hash {
             Ordering::Less
@@ -34,36 +33,38 @@ impl Ord for Vnode {
     }
 }
 
-impl PartialOrd for Vnode {
+impl<T> Eq for Vnode<T> {}
+
+impl<T> PartialOrd for Vnode<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialEq for Vnode {
+impl<T> PartialEq for Vnode<T> {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
     }
 }
 
-pub struct Ketama {
-    nodes: Vec<Vnode>,
+pub struct Ketama<T> {
+    nodes: Vec<Vnode<T>>,
 }
 
-impl Ketama {
+impl<T: Clone> Ketama<T> {
     pub fn new(capacity: usize) -> Self {
         Self {
             nodes: Vec::with_capacity(capacity),
         }
     }
 
-    pub fn add(&mut self, val: &str, spot: usize) {
+    pub fn add(&mut self, key: &str, val: T, spot: usize) {
         const PER_HASH: usize = 4;
         let n = (spot + PER_HASH - 1) / PER_HASH;
+        let prefix = String::from(key) + "-";
         let mut i = 0;
-        let val = Rc::new(val.to_owned());
         while i < n {
-            let sum = md5::compute(format!("{}+{}", val, i).as_bytes());
+            let sum = md5::compute((prefix.clone() + i.to_string().as_str()).as_bytes());
             for j in 0..PER_HASH {
                 let hash = unsafe { *((&sum[j * 4] as *const u8) as *const u32) };
                 self.nodes.push(Vnode {
@@ -79,7 +80,7 @@ impl Ketama {
         self.nodes.sort();
     }
 
-    pub fn query_u32(&self, key: u32) -> Option<&str> {
+    pub fn query_u32(&self, key: u32) -> Option<T> {
         if self.nodes.is_empty() {
             return None;
         }
@@ -101,10 +102,10 @@ impl Ketama {
             },
         };
         let node = &self.nodes[idx];
-        Some(node.val.as_str())
+        Some(node.val.clone())
     }
 
-    pub fn query(&self, key: &str) -> Option<&str> {
+    pub fn query(&self, key: &str) -> Option<T> {
         self.query_u32(hash::bkdr(key.as_bytes()))
     }
 }
@@ -113,11 +114,10 @@ impl Ketama {
 mod tests {
     use super::*;
 
-    fn ring_init(ring: &mut Ketama) {
-        ring.add("a", 128);
-        ring.add("b", 128);
-        let strc = String::from("c");
-        ring.add(strc.as_str(), 128);
+    fn ring_init(ring: &mut Ketama<i32>) {
+        ring.add("a", 1, 128);
+        ring.add("b", 2, 128);
+        ring.add("c", 3, 128);
         ring.build();
     }
 
@@ -125,13 +125,8 @@ mod tests {
     fn test_query() {
         let mut ring = Ketama::new(128 * 3);
         ring_init(&mut ring);
-        println!("{:?}", ring.query("ok"));
-        println!("{:?}", ring.query("233"));
-        println!("{:?}", ring.query("666"));
-        {
-            let a = ring.query("a");
-            println!("{:?}", a);
-        }
+        println!("nodes {:?}", ring.nodes);
+        println!("query 233: {:?}", ring.query("233"));
         ring.nodes.clear();
     }
 }
